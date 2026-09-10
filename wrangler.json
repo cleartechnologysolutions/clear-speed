@@ -1,0 +1,26 @@
+{
+  "name": "clear-speed",
+  "main": "index.js",
+  "compatibility_date": "2026-05-15",
+  "observability": {
+    "enabled": true
+  },
+  "ratelimits": [
+    {
+      "name": "SESSION_LIMITER",
+      "namespace_id": "927431",
+      "simple": {
+        "limit": 3,
+        "period": 60
+      }
+    },
+    {
+      "name": "TRANSFER_LIMITER",
+      "namespace_id": "927432",
+      "simple": {
+        "limit": 300,
+        "period": 60
+      }
+    }
+  ]
+}
