@@ -8,8 +8,10 @@ export const CLIENT = String.raw`function browserApp() {
   const median = a => { const s = [...a].sort((a,b) => a-b), n = s.length; return n ? (s[Math.floor((n-1)/2)] + s[Math.floor(n/2)]) / 2 : NaN; };
   const variation = a => a.length > 1 ? a.slice(1).reduce((s,x,i) => s + Math.abs(x-a[i]), 0) / (a.length-1) : NaN;
   let active = null, report = '';
+  const reports = {};
+  let cfLoading = null;
   function lock(controller) {
-    active = controller; $('start').disabled = $('voip-start').disabled = $('calls').disabled = !!controller;
+    active = controller; $('cf-start').disabled = $('start').disabled = $('voip-start').disabled = $('calls').disabled = !!controller;
     $('stop').disabled = !controller;
   }
   function check(signal) { signal.throwIfAborted(); }
@@ -32,7 +34,7 @@ export const CLIENT = String.raw`function browserApp() {
     try { await navigator.clipboard.writeText(report); $('copy').textContent = 'Copied'; }
     catch { $('status').textContent = 'Clipboard unavailable. Select and copy the report below.'; }
   };
-  function publish(text) { $('report-details').open = true; report = text; $('report').textContent = text; $('copy').disabled = false; $('copy').textContent = 'Copy results'; }
+  function publish(text) { $('report-details').open = true; reports[text.startsWith('VoIP') ? 'voip' : text.startsWith('Cloudflare') ? 'cloudflare' : 'custom'] = text; report = Object.values(reports).join('\n\n────────────────────\n\n'); $('report').textContent = report; $('copy').disabled = false; $('copy').textContent = 'Copy results'; }
   for (const [id, endpoint] of [['ipv4','https://api.ipify.org?format=json'],['ipv6','https://api6.ipify.org?format=json']]) {
     fetch(endpoint,{signal:AbortSignal.timeout(5000)}).then(r=>r.json()).then(d=>$(id).textContent=d.ip || 'Not available').catch(()=> { if ($(id).textContent === 'Checking...') $(id).textContent='Not available'; });
   }
@@ -120,6 +122,7 @@ export const CLIENT = String.raw`function browserApp() {
     return {bytes,ms,speed:rate(bytes,ms),capped:reserved>=LIMIT};
   }
   $('start').onclick=async()=>{
+    if(active) return;
     const controller=new AbortController(); lock(controller); $('copy').disabled=true; $('report').textContent='';
     for(const id of ['download','upload','latency','jitter','down-data','up-data']) $(id).textContent='—';
     try {
@@ -134,7 +137,7 @@ export const CLIENT = String.raw`function browserApp() {
       }
       $('status').textContent=notes.length?'Complete — see measurement notes below.':'Speed test complete'; $('bar').style.width='100%';
       $('usage').textContent=mib(down.bytes+up.bytes)+' measured payload';
-      publish(['Clear Speed v2 • '+new Date().toISOString(),'Cloudflare edge: '+$('server').textContent,
+      publish(['Our speed test • Build 3 • '+new Date().toISOString(),'Cloudflare edge: '+$('server').textContent,
         'Download: '+shown(down.speed)+' Mbps; '+$('down-data').textContent,
         'Upload: '+shown(up.speed)+' Mbps; '+$('up-data').textContent,
         'HTTP RTT median: '+shown(q.latency)+' ms; RTT variation: '+shown(q.variation)+' ms',
@@ -142,10 +145,70 @@ export const CLIENT = String.raw`function browserApp() {
     } catch(e) { $('status').textContent=e.message; $('download').textContent=$('upload').textContent='—'; $('bar').style.width='0%'; }
     finally { lock(null); }
   };
+
+  function loadCloudflare() {
+    if(window.CFEngine?.default) return Promise.resolve(window.CFEngine.default);
+    if(cfLoading) return cfLoading;
+    cfLoading=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');script.src='/cf-engine.js';
+      script.onload=()=>window.CFEngine?.default ? resolve(window.CFEngine.default) : reject(new Error('Cloudflare engine did not initialize.'));
+      script.onerror=()=>{script.remove();cfLoading=null;reject(new Error('Could not load the Cloudflare engine. Reload and retry.'));};
+      document.head.appendChild(script);
+    });
+    return cfLoading;
+  }
+  function showCloudflare(summary) {
+    for(const [id,key,divisor] of [['cf-download','download',1e6],['cf-upload','upload',1e6],['cf-latency','latency',1],['cf-jitter','jitter',1],['cf-loaded-down','downLoadedLatency',1],['cf-loaded-up','upLoadedLatency',1]]) {
+      $(id).textContent=Number.isFinite(summary[key]) ? shown(summary[key]/divisor) : '—';
+    }
+  }
+  $('cf-start').onclick=async()=>{
+    if(active) return;
+    const controller=new AbortController();lock(controller);
+    $('cf-status').textContent='Loading official engine…';$('cf-bar').classList.add('running');$('cf-bar').style.width='35%';
+    let engine, timeout, elapsedTimer;
+    try {
+      const summary=await new Promise((resolve,reject)=>{
+        let finished=false;
+        const finish=(error,result)=>{if(finished)return;finished=true;error?reject(error):resolve(result);};
+        controller.signal.addEventListener('abort',()=>{engine?.pause();finish(controller.signal.reason);},{once:true});
+        timeout=setTimeout(()=>controller.abort(new Error('Cloudflare test timed out. No completed result was recorded.')),180000);
+        loadCloudflare().then(Engine=>{
+          if(controller.signal.aborted) return;
+          engine=new Engine({autoStart:false,logAimApiUrl:null,logMeasurementApiUrl:null});
+          // Retain the pinned official ramp-up sequence, excluding tests needing other infrastructure.
+          engine.config.measurements=engine.config.measurements.filter(m=>['latency','download','upload'].includes(m.type));
+          engine.onResultsChange=({type})=>{if(!finished){showCloudflare(engine.results.getSummary());$('cf-status').textContent='Measuring '+(type==='latency'?'latency':type)+'…';}};
+          engine.onError=error=>{engine.pause();finish(new Error('Cloudflare test failed: '+String(error)));};
+          engine.onFinish=results=>{
+            const s=results.getSummary();
+            if(!Number.isFinite(s.download)||s.download<=0||!Number.isFinite(s.upload)||s.upload<=0||!Number.isFinite(s.latency)) {
+              finish(new Error('Cloudflare returned incomplete measurements. Please retry.'));return;
+            }
+            finish(null,s);
+          };
+          const start=performance.now();
+          elapsedTimer=setInterval(()=>$('cf-elapsed').textContent=((performance.now()-start)/1000).toFixed(0)+' s elapsed',250);
+          $('cf-status').textContent='Measuring latency…';engine.play();
+        }).catch(error=>finish(error));
+      });
+      showCloudflare(summary);$('cf-status').textContent='Cloudflare test complete';$('cf-bar').style.width='100%';
+      const duration=Number.isFinite(summary.totalDurationMs)?'Duration: '+(summary.totalDurationMs/1000).toFixed(1)+' s':'';
+      publish(['Cloudflare official engine 1.14.1 • '+new Date().toISOString(),
+        'Download: '+shown(summary.download/1e6)+' Mbps; upload: '+shown(summary.upload/1e6)+' Mbps',
+        'Unloaded latency: '+shown(summary.latency)+' ms; RTT variation: '+shown(summary.jitter)+' ms',
+        'Loaded latency: download '+shown(summary.downLoadedLatency)+' ms; upload '+shown(summary.upLoadedLatency)+' ms',duration,
+        'Official adaptive request method, not the custom parallel-stream average. Packet loss not tested.'].filter(Boolean).join('\n'));
+    } catch(error) {showCloudflare({});$('cf-status').textContent=error.message;$('cf-bar').style.width='0%';}
+    finally {clearTimeout(timeout);clearInterval(elapsedTimer);engine?.pause();$('cf-bar').classList.remove('running');lock(null);}
+  };
   $('voip-start').onclick=async()=>{
+    if(active) return;
     const calls=Number($('calls').value);
     if(!Number.isInteger(calls)||calls<1||calls>100) { $('voip-status').textContent='Choose a whole number from 1 to 100 calls.'; return; }
     const controller=new AbortController(); lock(controller); $('copy').disabled=true;
+    $('voip-bar').style.width='0%'; $('voip-time').textContent='60 seconds remaining';
+    for(const id of ['voip-latency','voip-jitter','voip-gap']) $(id).textContent='—';
     $('voip-status').textContent='Connecting…'; $('voip-output').textContent='';
     let socket, pacing, probes, watchdog;
     try {
@@ -158,7 +221,7 @@ export const CLIENT = String.raw`function browserApp() {
         const rtts=[], pending=new Map(); let probeId=0, probesSent=0;
         const fail=e=>{ if(!finished) { finished=true; reject(e); } };
         controller.signal.addEventListener('abort',()=>fail(controller.signal.reason),{once:true});
-        watchdog=setTimeout(()=>fail(new Error('Simulation timed out before server confirmation.')),40000);
+        watchdog=setTimeout(()=>fail(new Error('Simulation timed out before server confirmation.')),70000);
         socket.onerror=()=>fail(new Error('WebSocket connection failed.'));
         socket.onclose=()=>fail(new Error('Simulation connection closed before completion.'));
         socket.onopen=()=>{ socket.send(JSON.stringify({type:'start'})); };
@@ -173,15 +236,18 @@ export const CLIENT = String.raw`function browserApp() {
           if(data.type==='ready') {
             if(start) return; start=performance.now();
             const frame=new Uint8Array(size); crypto.getRandomValues(frame);
-            $('voip-status').textContent='Running '+calls+' call equivalents for 30 seconds…';
+            $('voip-status').textContent='Running '+calls+' call equivalents for 60 seconds…';
             pacing=setInterval(()=>{
               const elapsed=performance.now()-start;
-              if(elapsed>=30000||socket.readyState!==WebSocket.OPEN) return;
+              if(elapsed>=60000||socket.readyState!==WebSocket.OPEN) return;
+              $('voip-time').textContent=Math.max(0,Math.ceil((60000-elapsed)/1000))+' seconds remaining';
+              $('voip-bar').style.width=Math.min(100,elapsed/600)+'%';
+              $('voip-gap').textContent=shown(maxGap);
               const due=Math.floor(elapsed/20); if(due<=ticks) return;
               skipped+=Math.max(0,due-ticks-1); ticks=due;
               maxQueue=Math.max(maxQueue,socket.bufferedAmount);
               if(socket.bufferedAmount>size*25) skipped++; else {socket.send(frame);sent+=size;}
-              $('voip-output').textContent='Target: '+target.toFixed(2)+' Mbps each direction\nElapsed: '+(elapsed/1000).toFixed(1)+' / 30 s\nReceived: '+mib(down)+'\nLocal pacing/queue skips: '+skipped;
+              $('voip-output').textContent='Target: '+target.toFixed(2)+' Mbps each direction\nElapsed: '+(elapsed/1000).toFixed(1)+' / 60 s\nReceived: '+mib(down)+'\nLocal pacing/queue skips: '+skipped;
             },20);
             probes=setInterval(()=>{
               if(socket.readyState!==WebSocket.OPEN) return;
@@ -190,9 +256,10 @@ export const CLIENT = String.raw`function browserApp() {
             },1000);
           } else if(data.type==='pong' && pending.has(data.id)) {
             rtts.push(performance.now()-pending.get(data.id)); pending.delete(data.id);
+            $('voip-latency').textContent=shown(median(rtts)); $('voip-jitter').textContent=shown(variation(rtts));
           } else if(data.type==='summary') {
             const ms=performance.now()-start;
-            if(!start || !Number.isFinite(data.received) || data.received<0 || data.received>sent || !Number.isFinite(data.sent) || data.sent!==down || !Number.isFinite(data.duration) || data.duration<29000) {
+            if(!start || !Number.isFinite(data.received) || data.received<0 || data.received>sent || !Number.isFinite(data.sent) || data.sent!==down || !Number.isFinite(data.duration) || data.duration<59000) {
               fail(new Error('Incomplete simulation acknowledgement.'));return;
             }
             finished=true; resolve({calls,target,down,up:data.received,ms,serverMs:data.duration,rtts,skipped,maxQueue,maxGap,serverSkips:data.skipped,probesSent});
@@ -204,15 +271,17 @@ export const CLIENT = String.raw`function browserApp() {
       const notes=[];
       if(upRate<r.target*.95||downRate<r.target*.95) notes.push('Delivered load was below 95% of the target. Inspect pacing, buffering and connection performance.');
       if(r.skipped||r.serverSkips) notes.push('Pacing misses occurred; browser/server scheduling can contribute.');
-      const text=['VoIP load simulation • '+r.calls+' call equivalents • 30 seconds',
+      const text=['VoIP load simulation • '+r.calls+' call equivalents • 60 seconds',
         'Target: '+r.target.toFixed(2)+' Mbps EACH direction (100 kbps per call)',
         'Delivered upload: '+shown(upRate)+' Mbps (server-confirmed); download: '+shown(downRate)+' Mbps',
         'Loaded WebSocket RTT: median '+shown(median(r.rtts))+' ms; p95 '+shown(p95)+' ms',
-        'RTT variation: '+shown(variation(r.rtts))+' ms; replies: '+r.rtts.length+'/'+r.probesSent,
+        'RTT jitter (round-trip variation): '+shown(variation(r.rtts))+' ms; replies: '+r.rtts.length+'/'+r.probesSent,
         'Longest received-frame gap: '+shown(r.maxGap)+' ms',
         'Pacing skips: browser '+r.skipped+', server '+r.serverSkips+'; maximum observed upload queue: '+r.maxQueue+' bytes',
+        'Packet loss: not measurable with this TCP test; retransmissions can conceal lost packets.',
         ...notes,'Aggregated synthetic traffic over one reliable WebSocket (TCP), not separate SIP/RTP calls. No audio, UDP packet-loss, one-way jitter or MOS measurement. Late delivery may be masked by TCP retransmission.'].join('\n');
-      $('voip-output').textContent=text; $('voip-status').textContent='Simulation complete — review results below.'; publish(text);
+      $('voip-output').textContent=text; $('voip-status').textContent=notes.length?'Simulation complete — delivery/pacing notes below.':'Simulation complete — review results below.';
+      $('voip-bar').style.width='100%'; $('voip-time').textContent='60-second simulation complete'; $('voip-gap').textContent=shown(r.maxGap); publish(text);
     } catch(e) { $('voip-status').textContent=e.message; }
     finally { clearInterval(pacing);clearInterval(probes);clearTimeout(watchdog);if(socket) socket.close();lock(null); }
   };

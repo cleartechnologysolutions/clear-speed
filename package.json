@@ -1,14 +1,18 @@
 {
   "name": "clear-speed",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "test": "node tests/measurements.mjs && node tests/voip.mjs",
-    "test:runtime": "wrangler deploy --dry-run --outdir .test-build && node tests/runtime.mjs"
+    "test": "node tests/measurements.mjs && node tests/voip.mjs && node tests/cloudflare.mjs",
+    "test:runtime": "wrangler deploy --dry-run --outdir .test-build && node tests/runtime.mjs",
+    "build:engine": "node scripts/build-engine.mjs"
   },
   "devDependencies": {
     "wrangler": "4.92.0"
+  },
+  "dependencies": {
+    "@cloudflare/speedtest": "1.14.1"
   }
 }

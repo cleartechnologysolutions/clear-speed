@@ -19,7 +19,7 @@ async function simulate(calls,mode='normal') {
   setTimeout:(fn,ms)=>schedule(fn,ms),clearTimeout:clear,setInterval:(fn,ms)=>schedule(fn,ms,true),clearInterval:clear,
   Response:class {constructor(body,opts){Object.assign(this,opts);}},
   WebSocketPair:class {constructor(){const a=new Socket(),b=new Socket();a.other=b;b.other=a;this[0]=a;this[1]=b;lastServer=b;}},
-  document:{getElementById(id){if(!els.has(id))els.set(id,{textContent:'',value:String(calls),style:{}});return els.get(id);},addEventListener(type,fn){listeners[type]=fn;}},navigator:{},location:{protocol:'https:',host:'test.example'},
+  document:{getElementById(id){if(!els.has(id))els.set(id,{textContent:'',value:String(calls),style:{},classList:{add(){},remove(){}}});return els.get(id);},addEventListener(type,fn){listeners[type]=fn;}},navigator:{},location:{protocol:'https:',host:'test.example'},
   fetch:async()=>({ok:true,json:async()=>({token:'abc',ip:'192.0.2.1'})})});
  vm.runInContext('globalThis.voipResponse='+voipResponse.toString(),context);
  context.WebSocket=class {

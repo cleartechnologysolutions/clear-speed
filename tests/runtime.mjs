@@ -16,13 +16,13 @@ try{
  const response=await mf.dispatchFetch('http://localhost/voip?calls=10&token='+token,{headers:{Upgrade:'websocket',Origin:'http://localhost'}});
  assert.equal(response.status,101);const ws=response.webSocket;ws.binaryType='arraybuffer';ws.accept();let bytes=0;
  const summary=await new Promise((resolve,reject)=>{
-  timer=setTimeout(()=>reject(Error('timeout')),35000);
+  timer=setTimeout(()=>reject(Error('timeout')),70000);
   ws.addEventListener('close',e=>{if(e.code!==1000)reject(Error('Closed: '+e.code+' '+e.reason));});
   ws.addEventListener('message',e=>{
    if(typeof e.data!=='string'){bytes+=e.data.byteLength;ws.send(e.data);return;}
    const d=JSON.parse(e.data);if(d.type==='summary')resolve(d);
   });ws.send(JSON.stringify({type:'start'}));
  });
- assert.ok(bytes>3e6&&bytes<4e6);assert.equal(summary.sent,bytes);assert.ok(summary.received>3e6);
- console.log('PASS Worker runtime 30-second duplex simulation',JSON.stringify(summary));
+ assert.ok(bytes>6e6&&bytes<8e6);assert.equal(summary.sent,bytes);assert.ok(summary.received>6e6);
+ console.log('PASS Worker runtime 60-second duplex simulation',JSON.stringify(summary));
 }finally{clearTimeout(timer);await mf.dispose();}

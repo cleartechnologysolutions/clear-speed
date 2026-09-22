@@ -1,3 +1,4 @@
+import { CF_ENGINE } from "./vendor/cloudflare-engine.js";
 import { CLIENT } from "./client.js";
 import { voipResponse } from "./voip.js";
 const SESSION_SECRET = "f9d2e7b437ec4d63a8e142769df03cb7735cc8e268d84a3d906516d6264ae117";
@@ -122,7 +123,7 @@ function page(request) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Clear Speed | Clear Technology Solutions</title>
+  <title>Speed Test</title>
   <meta name="description" content="Internet speed and network quality test.">
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #07111d; color: #f8fafc; }
@@ -167,6 +168,7 @@ function page(request) {
     .detail strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 14px; }
     .note { margin: 18px 0 0; color: #8faec5; font-size: 12px; line-height: 1.5; }
     .voip { margin-top:28px; border-top:1px solid #38536a; padding-top:18px; } h2 {font-size:20px;} input {font:inherit; color:inherit; background:#07111d; border:1px solid #38536a; border-radius:5px; padding:10px; width:90px;} .controls {flex-wrap:wrap;align-items:center;} pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;} details {margin-top:20px;} #status, #voip-status {line-height:1.5;}
+    main {width:min(1460px,calc(100% - 28px));} .layout {grid-template-columns:230px minmax(0,1fr);} .workspace {min-width:0;} .test-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;} .test-card {min-width:0;padding:16px;border:1px solid #2a4054;border-radius:8px;background:#0d1826;} .test-card h2 {margin:0;} .test-card .meter {min-height:104px;} .test-card>.note {margin:10px 0 16px;} .test-card .results {grid-template-columns:repeat(2,minmax(0,1fr));} .test-card .result {padding:15px 10px;} .test-card .result:nth-child(2) {border-right:0;} .test-card .result:nth-child(-n+2) {border-bottom:1px solid #2a4054;} .test-card .details {grid-template-columns:repeat(2,minmax(0,1fr));} .test-card .result strong {font-size:32px;} .detail strong span {display:inline;font:inherit;color:inherit;letter-spacing:normal;} .running {animation:scan 1.4s ease-in-out infinite alternate;} @keyframes scan {from {transform:translateX(0);}to {transform:translateX(180%);}} @media(prefers-reduced-motion:reduce){.running{animation:none;}} @media(max-width:1100px){.layout{grid-template-columns:1fr;}.network{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}} @media(max-width:720px){.test-grid{grid-template-columns:1fr;}}
     @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } .results { grid-template-columns: repeat(2, 1fr); } .result:nth-child(2) { border-right: 0; } .result:nth-child(-n+2) { border-bottom: 1px solid #2a4054; } .details { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 520px) { main { width: min(100% - 18px, 1120px); } header, .workspace, aside { padding: 14px; } .brand strong { font-size: 14px; } .results, .details { grid-template-columns: 1fr; } .result { border-right: 0; border-bottom: 1px solid #2a4054; } .result:last-child { border-bottom: 0; } .controls { flex-direction: column; } }
   </style>
@@ -174,11 +176,11 @@ function page(request) {
 <body>
   <main>
     <header>
-      <div class="brand"><div class="mark">CTS</div><div><strong>Clear Technology Solutions</strong><span>Network speed test · Build 2</span></div></div>
+      <div class="brand"><div class="mark" aria-hidden="true">↕</div><div><strong>Speed Test</strong><span>Network speed test · Build 3</span></div></div>
     </header>
     <section class="layout">
       <aside>
-        <h1>Clear Speed</h1>
+        <h1>Your connection</h1>
         <p>Measure your connection to the Cloudflare edge serving you. The test runs only when you press Start.</p>
         <div class="network">
           <div><span>IPv4</span><strong id="ipv4">${seenIp.includes(":") ? "Checking..." : escape(seenIp)}</strong></div>
@@ -188,6 +190,24 @@ function page(request) {
         </div>
       </aside>
       <section class="workspace">
+        <div class="test-grid">
+        <section class="test-card">
+          <h2><span aria-hidden="true">☁</span> Cloudflare Test</h2>
+          <p class="note">Official engine · adaptive requests</p>
+          <div class="results">
+            <div class="result"><span>Download</span><strong id="cf-download">—</strong><small>Mbps</small></div>
+            <div class="result"><span>Upload</span><strong id="cf-upload">—</strong><small>Mbps</small></div>
+            <div class="result"><span>Latency</span><strong id="cf-latency">—</strong><small>ms</small></div>
+            <div class="result"><span>RTT variation</span><strong id="cf-jitter">—</strong><small>ms</small></div>
+          </div>
+          <div class="meter"><p id="cf-status" role="status">Ready</p><div class="track"><div class="bar" id="cf-bar"></div></div><p class="note" id="cf-elapsed">Runs only when you click Run.</p></div>
+          <div class="controls"><button class="primary" id="cf-start">Run Cloudflare Test</button></div>
+          <div class="details"><div class="detail"><span>Loaded latency ↓</span><strong><span id="cf-loaded-down">—</span> ms</strong></div><div class="detail"><span>Loaded latency ↑</span><strong><span id="cf-loaded-up">—</span> ms</strong></div></div>
+          <p class="note">Tests your browser directly against speed.cloudflare.com. The adaptive sequence can use about 1.3 GB of payload, plus retries and overhead. Packet-loss testing is not enabled.</p>
+        </section>
+        <section class="test-card">
+        <h2><span aria-hidden="true">↕</span> Our Test</h2>
+        <p class="note">Parallel streams · measured average</p>
         <div class="results">
           <div class="result"><span>Download</span><strong id="download">-</strong><small>Mbps</small></div>
           <div class="result"><span>Upload</span><strong id="upload">-</strong><small>Mbps</small></div>
@@ -199,9 +219,8 @@ function page(request) {
           <div class="track"><div class="bar" id="bar"></div></div>
         </div>
         <div class="controls">
-          <button class="primary" id="start">Start speed test</button>
-          <button class="secondary" id="stop" disabled>Stop</button>
-          <button class="secondary" id="copy" disabled>Copy results</button>
+          <button class="primary" id="start">Run Our Test</button>
+
         </div>
         <div class="details">
           <div class="detail"><span>Test server</span><strong id="server">${escape(server)}</strong></div>
@@ -209,11 +228,22 @@ function page(request) {
           <div class="detail"><span>Upload data</span><strong id="up-data">-</strong></div>
         </div>
         <p class="note">Up to 10 seconds per direction, with a 768 MiB payload cap per direction (up to 1.5 GiB total, plus warmup and protocol overhead). Keep this tab visible. Upload is counted only after server acknowledgement. Very fast links may reach the cap early.</p>
+        </section>
+        </div>
+        <div class="controls"><button class="secondary" id="stop" disabled>Stop current test</button><button class="secondary" id="copy" disabled>Copy results</button></div>
+        <p class="note">Run either speed test. Its results stay visible while you run the other. Only one test runs at a time to prevent competing traffic.</p>
         <section class="voip">
           <h2>Concurrent VoIP simulation</h2>
-          <p class="note">Generate 100 kbps per call in each direction for 30 seconds. Ten calls target 1 Mbps each way and approximately 7.5 MB total payload. Synthetic traffic only; no microphone or telephone service needed.</p>
-          <div class="controls"><label for="calls">Concurrent calls <input id="calls" type="number" min="1" max="100" step="1" value="10"></label><button class="primary" id="voip-start">Simulate calls</button></div>
+          <p class="note">Generate 100 kbps per call in each direction for 60 seconds. Ten calls target 1 Mbps each way and approximately 15 MB total payload. Synthetic traffic only; no microphone or telephone service needed.</p>
+          <div class="controls"><label for="calls">Concurrent calls <input id="calls" type="number" min="1" max="100" step="1" value="10"></label><button class="primary" id="voip-start">Run 60-second simulation</button></div>
           <p id="voip-status" role="status">Ready — default: 10 calls</p>
+          <div class="results voip-results">
+            <div class="result"><span>Latency</span><strong id="voip-latency">—</strong><small>median round trip · ms</small></div>
+            <div class="result"><span>RTT jitter</span><strong id="voip-jitter">—</strong><small>round-trip variation · ms</small></div>
+            <div class="result"><span>Longest gap</span><strong id="voip-gap">—</strong><small>between received frames · ms</small></div>
+            <div class="result"><span>Packet loss</span><strong style="font-size:18px;line-height:1.4">Not measurable</strong><small>TCP retransmits lost data</small></div>
+          </div>
+          <p class="note" id="voip-time">60-second test</p><div class="track"><div class="bar" id="voip-bar"></div></div>
           <pre id="voip-output" aria-live="off"></pre>
           <p class="note">Models aggregate bandwidth and delay over a WebSocket, not actual RTP/UDP calls. It cannot measure real VoIP packet loss, one-way jitter or MOS.</p>
         </section>
@@ -233,6 +263,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/cf-engine.js") return new Response(CF_ENGINE, {headers:{"content-type":"application/javascript; charset=utf-8","cache-control":"no-cache","x-content-type-options":"nosniff"}});
     if (url.pathname === "/") {
       return new Response(page(request), {
         headers: {

@@ -10,7 +10,7 @@ export function voipResponse(request) {
   let started=0, received=0, sent=0, ticks=0, skipped=0, timer, end, probes=0, closed=false;
   function clean() { closed=true;clearInterval(timer);clearTimeout(end);clearTimeout(watchdog); }
   function close(code=1000,reason='Complete') {clean();try{server.close(code,reason);}catch{}}
-  const watchdog=setTimeout(()=>close(1008,'Session time limit'),35000);
+  const watchdog=setTimeout(()=>close(1008,'Session time limit'),65000);
   server.addEventListener('close',clean); server.addEventListener('error',clean);
   server.addEventListener('message',event=>{
     if(closed) return;
@@ -23,7 +23,7 @@ export function voipResponse(request) {
           timer=setInterval(()=>{
             try {
               const due=Math.floor((Date.now()-started)/20);
-              if(due<=ticks||due>1500) return;
+              if(due<=ticks||due>3000) return;
               skipped+=Math.max(0,due-ticks-1);ticks=due;server.send(frame);sent+=size;
             } catch {close(1011,'Send failed');}
           },20);
@@ -31,11 +31,11 @@ export function voipResponse(request) {
             clearInterval(timer);
             try {server.send(JSON.stringify({type:'summary',received,sent,duration:Date.now()-started,skipped}));}catch{}
             close();
-          },30000);
-        } else if(data.type==='probe'&&started&&Number.isInteger(data.id)&&++probes<=40) server.send(JSON.stringify({type:'pong',id:data.id}));
+          },60000);
+        } else if(data.type==='probe'&&started&&Number.isInteger(data.id)&&++probes<=70) server.send(JSON.stringify({type:'pong',id:data.id}));
         else close(1008,'Invalid control message');
       } else {
-        if(!started||event.data.byteLength!==size||received+size>size*1550) return close(1008,'Simulation traffic limit');
+        if(!started||event.data.byteLength!==size||received+size>size*3050) return close(1008,'Simulation traffic limit');
         received+=size;
       }
     } catch {close(1008,'Invalid message');}
