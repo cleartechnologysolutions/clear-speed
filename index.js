@@ -1,3 +1,5 @@
+import { CLIENT } from "./client.js";
+import { voipResponse } from "./voip.js";
 const SESSION_SECRET = "f9d2e7b437ec4d63a8e142769df03cb7735cc8e268d84a3d906516d6264ae117";
 const SESSION_SECONDS = 90;
 const MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024;
@@ -112,7 +114,8 @@ function page(request) {
   const seenIp = clientIp(request);
   const isp = cf.asOrganization || "Unknown";
   const asn = cf.asn ? `AS${cf.asn}` : "Unknown";
-  const server = [cf.colo, cf.city, cf.region].filter(Boolean).join(" / ") || "Cloudflare edge";
+  const server = cf.colo ? `Cloudflare edge ${cf.colo}` : "Cloudflare edge";
+  const escape = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]));
 
   return `<!doctype html>
 <html lang="en">
@@ -163,6 +166,7 @@ function page(request) {
     .detail span { display: block; color: #87b8d8; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
     .detail strong { display: block; margin-top: 5px; overflow-wrap: anywhere; font-size: 14px; }
     .note { margin: 18px 0 0; color: #8faec5; font-size: 12px; line-height: 1.5; }
+    .voip { margin-top:28px; border-top:1px solid #38536a; padding-top:18px; } h2 {font-size:20px;} input {font:inherit; color:inherit; background:#07111d; border:1px solid #38536a; border-radius:5px; padding:10px; width:90px;} .controls {flex-wrap:wrap;align-items:center;} pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;} details {margin-top:20px;} #status, #voip-status {line-height:1.5;}
     @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } .results { grid-template-columns: repeat(2, 1fr); } .result:nth-child(2) { border-right: 0; } .result:nth-child(-n+2) { border-bottom: 1px solid #2a4054; } .details { grid-template-columns: 1fr 1fr; } }
     @media (max-width: 520px) { main { width: min(100% - 18px, 1120px); } header, .workspace, aside { padding: 14px; } .brand strong { font-size: 14px; } .results, .details { grid-template-columns: 1fr; } .result { border-right: 0; border-bottom: 1px solid #2a4054; } .result:last-child { border-bottom: 0; } .controls { flex-direction: column; } }
   </style>
@@ -170,227 +174,56 @@ function page(request) {
 <body>
   <main>
     <header>
-      <div class="brand"><div class="mark">CTS</div><div><strong>Clear Technology Solutions</strong><span>Network speed test</span></div></div>
+      <div class="brand"><div class="mark">CTS</div><div><strong>Clear Technology Solutions</strong><span>Network speed test · Build 2</span></div></div>
     </header>
     <section class="layout">
       <aside>
         <h1>Clear Speed</h1>
-        <p>Measure your connection to the nearest Cloudflare edge. The test runs only when you press Start.</p>
+        <p>Measure your connection to the Cloudflare edge serving you. The test runs only when you press Start.</p>
         <div class="network">
-          <div><span>IPv4</span><strong id="ipv4">${seenIp.includes(":") ? "Checking..." : seenIp}</strong></div>
-          <div><span>IPv6</span><strong id="ipv6">${seenIp.includes(":") ? seenIp : "Checking..."}</strong></div>
-          <div><span>ISP / Network</span><strong>${isp}</strong></div>
-          <div><span>ASN</span><strong>${asn}</strong></div>
+          <div><span>IPv4</span><strong id="ipv4">${seenIp.includes(":") ? "Checking..." : escape(seenIp)}</strong></div>
+          <div><span>IPv6</span><strong id="ipv6">${seenIp.includes(":") ? escape(seenIp) : "Checking..."}</strong></div>
+          <div><span>ISP / Network</span><strong>${escape(isp)}</strong></div>
+          <div><span>ASN</span><strong>${escape(asn)}</strong></div>
         </div>
       </aside>
       <section class="workspace">
         <div class="results">
           <div class="result"><span>Download</span><strong id="download">-</strong><small>Mbps</small></div>
           <div class="result"><span>Upload</span><strong id="upload">-</strong><small>Mbps</small></div>
-          <div class="result"><span>Latency</span><strong id="latency">-</strong><small>ms</small></div>
-          <div class="result"><span>Jitter</span><strong id="jitter">-</strong><small>ms</small></div>
+          <div class="result"><span>HTTP RTT</span><strong id="latency">-</strong><small>ms</small></div>
+          <div class="result"><span>RTT variation</span><strong id="jitter">-</strong><small>ms</small></div>
         </div>
         <div class="meter">
-          <div class="meter-head"><span id="status">Ready</span><span id="usage">0 MB transferred</span></div>
+          <div class="meter-head"><span id="status" role="status">Ready</span><span id="usage">0 MB transferred</span></div>
           <div class="track"><div class="bar" id="bar"></div></div>
         </div>
         <div class="controls">
           <button class="primary" id="start">Start speed test</button>
+          <button class="secondary" id="stop" disabled>Stop</button>
           <button class="secondary" id="copy" disabled>Copy results</button>
         </div>
         <div class="details">
-          <div class="detail"><span>Test server</span><strong>${server}</strong></div>
+          <div class="detail"><span>Test server</span><strong id="server">${escape(server)}</strong></div>
           <div class="detail"><span>Download data</span><strong id="down-data">-</strong></div>
           <div class="detail"><span>Upload data</span><strong id="up-data">-</strong></div>
         </div>
+        <p class="note">Up to 10 seconds per direction, with a 768 MiB payload cap per direction (up to 1.5 GiB total, plus warmup and protocol overhead). Keep this tab visible. Upload is counted only after server acknowledgement. Very fast links may reach the cap early.</p>
+        <section class="voip">
+          <h2>Concurrent VoIP simulation</h2>
+          <p class="note">Generate 100 kbps per call in each direction for 30 seconds. Ten calls target 1 Mbps each way and approximately 7.5 MB total payload. Synthetic traffic only; no microphone or telephone service needed.</p>
+          <div class="controls"><label for="calls">Concurrent calls <input id="calls" type="number" min="1" max="100" step="1" value="10"></label><button class="primary" id="voip-start">Simulate calls</button></div>
+          <p id="voip-status" role="status">Ready — default: 10 calls</p>
+          <pre id="voip-output" aria-live="off"></pre>
+          <p class="note">Models aggregate bandwidth and delay over a WebSocket, not actual RTP/UDP calls. It cannot measure real VoIP packet loss, one-way jitter or MOS.</p>
+        </section>
+        <details id="report-details"><summary>Last completed report</summary><pre id="report"></pre></details>
         <p class="note">Results measure performance to Cloudflare, not every destination on the internet. VPNs, Wi-Fi, browser load, and device performance can affect the result.</p>
       </section>
     </section>
   </main>
   <script>
-    const elements = Object.fromEntries(["start", "copy", "status", "usage", "bar", "download", "upload", "latency", "jitter", "down-data", "up-data", "ipv4", "ipv6"].map(id => [id, document.getElementById(id)]));
-    const DOWNLOAD_SECONDS = 5;
-    const UPLOAD_SECONDS = 5;
-    const DOWNLOAD_LIMIT = 768 * 1024 * 1024;
-    const UPLOAD_LIMIT = 384 * 1024 * 1024;
-    const DOWNLOAD_CHUNK = 32 * 1024 * 1024;
-    const UPLOAD_CHUNK = 32 * 1024 * 1024;
-    let results = null;
-
-    const mb = bytes => (bytes / 1024 / 1024).toFixed(0) + " MB";
-    const mbps = (bytes, milliseconds) => bytes * 8 / milliseconds / 1000;
-    const shown = value => value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2);
-    const median = values => { const sorted = [...values].sort((a, b) => a - b); return sorted[Math.floor(sorted.length / 2)]; };
-
-    async function detectIp(version, endpoint) {
-      try {
-        const response = await fetch(endpoint, { cache: "no-store" });
-        const data = await response.json();
-        elements[version].textContent = data.ip || "Not available";
-      } catch { elements[version].textContent = "Not available"; }
-    }
-
-    detectIp("ipv4", "https://api.ipify.org?format=json");
-    detectIp("ipv6", "https://api6.ipify.org?format=json");
-
-    async function getSession() {
-      const response = await fetch("/session", { method: "POST", cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not start test.");
-      return data.token;
-    }
-
-    async function testLatency(token) {
-      elements.status.textContent = "Testing latency";
-      elements.bar.style.width = "10%";
-      const samples = [];
-      for (let i = 0; i < 10; i++) {
-        const started = performance.now();
-        const response = await fetch("/ping?token=" + encodeURIComponent(token) + "&n=" + i, { cache: "no-store" });
-        if (!response.ok) throw new Error("Latency test failed.");
-        samples.push(performance.now() - started);
-      }
-      const latency = median(samples);
-      const deltas = samples.slice(1).map((value, index) => Math.abs(value - samples[index]));
-      const jitter = deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
-      elements.latency.textContent = shown(latency);
-      elements.jitter.textContent = shown(jitter);
-      return { latency, jitter };
-    }
-
-    async function testDownload(token) {
-      elements.status.textContent = "Testing download";
-      const controller = new AbortController();
-      const started = performance.now();
-      const deadline = started + DOWNLOAD_SECONDS * 1000;
-      let bytes = 0;
-
-      async function stream() {
-        while (performance.now() < deadline && bytes < DOWNLOAD_LIMIT) {
-          try {
-            const response = await fetch("/download?bytes=" + DOWNLOAD_CHUNK + "&token=" + encodeURIComponent(token) + "&r=" + crypto.randomUUID(), { cache: "no-store", signal: controller.signal });
-            if (!response.ok) throw new Error("Download test was limited.");
-            const reader = response.body.getReader();
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              bytes += value.byteLength;
-              const elapsed = performance.now() - started;
-              elements.download.textContent = shown(mbps(bytes, elapsed));
-              elements.usage.textContent = mb(bytes) + " transferred";
-              elements.bar.style.width = Math.min(55, 15 + elapsed / (DOWNLOAD_SECONDS * 1000) * 40) + "%";
-              if (performance.now() >= deadline || bytes >= DOWNLOAD_LIMIT) { controller.abort(); break; }
-            }
-          } catch (error) { if (error.name !== "AbortError") throw error; }
-        }
-      }
-
-      try {
-        await Promise.all(Array.from({ length: 6 }, stream));
-      } finally {
-        controller.abort();
-      }
-      const duration = Math.min(performance.now() - started, DOWNLOAD_SECONDS * 1000);
-      const speed = mbps(bytes, duration);
-      elements.download.textContent = shown(speed);
-      elements["down-data"].textContent = mb(bytes);
-      return { speed, bytes };
-    }
-
-    function makeUploadData() {
-      const seed = crypto.getRandomValues(new Uint8Array(64 * 1024));
-      const data = new Uint8Array(UPLOAD_CHUNK);
-      for (let offset = 0; offset < data.length; offset += seed.length) data.set(seed, offset);
-      return new Blob([data], { type: "application/octet-stream" });
-    }
-
-    async function testUpload(token) {
-      elements.status.textContent = "Testing upload";
-      const payload = makeUploadData();
-      const started = performance.now();
-      const deadline = started + UPLOAD_SECONDS * 1000;
-      let completedBytes = 0;
-      const active = new Set();
-
-      async function send() {
-        while (performance.now() < deadline && completedBytes < UPLOAD_LIMIT) {
-          await new Promise(resolve => {
-            const xhr = new XMLHttpRequest();
-            active.add(xhr);
-            let lastLoaded = 0;
-            xhr.open("POST", "/upload?token=" + encodeURIComponent(token) + "&r=" + crypto.randomUUID());
-            xhr.upload.onprogress = event => {
-              const delta = Math.max(0, event.loaded - lastLoaded);
-              lastLoaded = event.loaded;
-              completedBytes += delta;
-              const elapsed = performance.now() - started;
-              elements.upload.textContent = shown(mbps(completedBytes, elapsed));
-              elements.usage.textContent = mb(completedBytes) + " uploaded";
-              elements.bar.style.width = Math.min(98, 60 + elapsed / (UPLOAD_SECONDS * 1000) * 38) + "%";
-              if (performance.now() >= deadline || completedBytes >= UPLOAD_LIMIT) xhr.abort();
-            };
-            const finish = () => { active.delete(xhr); resolve(); };
-            xhr.onload = finish;
-            xhr.onerror = finish;
-            xhr.onabort = finish;
-            xhr.send(payload);
-          });
-        }
-      }
-
-      const timer = window.setTimeout(() => active.forEach(xhr => xhr.abort()), UPLOAD_SECONDS * 1000);
-      await Promise.all(Array.from({ length: 4 }, send));
-      window.clearTimeout(timer);
-      active.forEach(xhr => xhr.abort());
-      const duration = Math.min(performance.now() - started, UPLOAD_SECONDS * 1000);
-      const speed = mbps(completedBytes, duration);
-      elements.upload.textContent = shown(speed);
-      elements["up-data"].textContent = mb(completedBytes);
-      return { speed, bytes: completedBytes };
-    }
-
-    async function runTest() {
-      elements.start.disabled = true;
-      elements.copy.disabled = true;
-      elements.start.textContent = "Testing...";
-      elements.download.textContent = elements.upload.textContent = elements.latency.textContent = elements.jitter.textContent = "-";
-      elements.bar.style.width = "2%";
-      try {
-        const token = await getSession();
-        const quality = await testLatency(token);
-        const download = await testDownload(token);
-        const upload = await testUpload(token);
-        results = { ...quality, download, upload };
-        elements.status.textContent = "Test complete";
-        elements.usage.textContent = mb(download.bytes + upload.bytes) + " total";
-        elements.bar.style.width = "100%";
-        elements.copy.disabled = false;
-      } catch (error) {
-        elements.status.textContent = error.message || "Test failed";
-        elements.bar.style.width = "0";
-      } finally {
-        elements.start.disabled = false;
-        elements.start.textContent = "Retest";
-      }
-    }
-
-    elements.start.addEventListener("click", runTest);
-    elements.copy.addEventListener("click", async () => {
-      if (!results) return;
-      const text = [
-        "Clear Speed results",
-        "Download: " + shown(results.download.speed) + " Mbps",
-        "Upload: " + shown(results.upload.speed) + " Mbps",
-        "Latency: " + shown(results.latency) + " ms",
-        "Jitter: " + shown(results.jitter) + " ms",
-        "IPv4: " + elements.ipv4.textContent,
-        "IPv6: " + elements.ipv6.textContent,
-        "Server: " + ${JSON.stringify(server)},
-      ].join("\\n");
-      await navigator.clipboard.writeText(text);
-      elements.copy.textContent = "Copied";
-      window.setTimeout(() => elements.copy.textContent = "Copy results", 1400);
-    });
+    (${CLIENT})();
   </script>
 </body>
 </html>`;
@@ -416,7 +249,7 @@ export default {
       return json({ token: await createToken(request), expiresIn: SESSION_SECONDS });
     }
 
-    if (!["/ping", "/download", "/upload"].includes(url.pathname)) return new Response("Not found", { status: 404 });
+    if (!["/ping", "/download", "/upload", "/voip"].includes(url.pathname)) return new Response("Not found", { status: 404 });
     if (!(await tokenIsValid(request))) return json({ error: "Invalid or expired test session." }, 403);
 
     if (url.pathname === "/ping") {
@@ -425,6 +258,8 @@ export default {
 
     const allowed = await rateLimit(env.TRANSFER_LIMITER, `${clientIp(request)}:${url.pathname}`);
     if (!allowed) return json({ error: "Speed test rate limit reached." }, 429);
+
+    if (url.pathname === "/voip") return voipResponse(request);
 
     if (url.pathname === "/download" && request.method === "GET") {
       const requested = Number(url.searchParams.get("bytes") || MAX_DOWNLOAD_BYTES);
